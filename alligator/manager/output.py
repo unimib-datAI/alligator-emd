@@ -33,7 +33,13 @@ class OutputManager(DatabaseAccessMixin):
         if isinstance(self.config.data.input_csv, pd.DataFrame):
             header = self.config.data.input_csv.columns.tolist()
         elif isinstance(self.config.data.input_csv, (str, Path)):
-            header = pd.read_csv(self.config.data.input_csv, nrows=0).columns.tolist()
+            csv_kwargs = {
+                "sep": self.config.data.csv_separator,
+                "header": self.config.data.csv_header,
+            }
+            header = pd.read_csv(self.config.data.input_csv, nrows=0, **csv_kwargs).columns.tolist()
+            if not header:
+                header = None
 
         # Get first document to determine column count if header is still None
         sample_doc = input_collection.find_one(
@@ -48,6 +54,8 @@ class OutputManager(DatabaseAccessMixin):
                 "Could not extract header from input table, using generic column names."
             )
             header = [f"col_{i}" for i in range(len(sample_doc["data"]))]
+        else:
+            header = [str(col) for col in header]
 
         # Write directly to CSV without storing in memory
         if self.config.data.save_output_to_csv and isinstance(

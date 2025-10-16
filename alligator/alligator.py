@@ -40,7 +40,7 @@ class Alligator:
         column_types: Mapping[str, Union[str, List[str]]] | None = None,
         worker_batch_size: int = 16,
         num_workers: Optional[int] = 1,
-        max_candidates_in_result: int = 10,
+        max_candidates_in_result: int = 16,
         entity_retrieval_endpoint: Optional[str] = None,
         entity_retrieval_token: Optional[str] = None,
         object_retrieval_endpoint: Optional[str] = None,
@@ -50,12 +50,14 @@ class Alligator:
         ranker_model_path: Optional[str] = None,
         reranker_model_path: Optional[str] = None,
         ml_worker_batch_size: int = 256,
-        num_ml_workers: int = 2,
+        num_ml_workers: int = 1,
         top_n_cta_cpa_freq: int = 3,
         doc_percentage_type_features: float = 1.0,
-        save_output: bool = True,
-        save_output_to_csv: bool = True,
+        save_output: bool = False,
+        save_output_to_csv: bool = False,
         correct_qids: Dict[str, str | List[str]] | None = None,
+        csv_separator: str = ",",
+        csv_header: Union[str, int, List[int], None] = "infer",
         http_session_limit: int = 32,
         http_session_ssl_verify: bool = False,
         **kwargs,
@@ -89,6 +91,8 @@ class Alligator:
             save_output=save_output,
             save_output_to_csv=save_output_to_csv,
             correct_qids=correct_qids,
+            csv_separator=csv_separator,
+            csv_header=csv_header,
             http_session_limit=http_session_limit,
             http_session_ssl_verify=http_session_ssl_verify,
             **kwargs,
@@ -119,6 +123,8 @@ class Alligator:
         self.top_n_cta_cpa_freq = self.config.feature.top_n_cta_cpa_freq
         self.doc_percentage_type_features = self.config.feature.doc_percentage_type_features
         self.correct_qids = self.config.data.correct_qids
+        self.csv_separator = self.config.data.csv_separator
+        self.csv_header = self.config.data.csv_header
 
         # Expose some internal properties for compatibility
         self._save_output = self.config.data.save_output

@@ -34,6 +34,8 @@ class DataConfig:
     correct_qids: Dict[str, Union[str, List[str]]] = field(default_factory=dict)
     dry_run: bool = False
     candidate_retrieval_only: bool = False
+    csv_separator: str = ","
+    csv_header: Union[str, int, List[int], None] = "infer"
 
     def __post_init__(self):
         """Validate and process data configuration after initialization."""
@@ -42,6 +44,7 @@ class DataConfig:
         self._process_target_rows()
         self._process_correct_qids()
         self._process_column_types()
+        self._validate_csv_options()
 
     def _validate_input(self):
         """Validate input data configuration."""
@@ -131,6 +134,31 @@ class DataConfig:
                 )
 
         self.column_types = processed_types
+
+    def _validate_csv_options(self):
+        """Validate CSV loading options."""
+        if not isinstance(self.csv_separator, str) or not self.csv_separator:
+            raise ValueError("CSV separator must be a non-empty string.")
+
+        valid_header_types = (str, int, list, tuple, type(None))
+        if not isinstance(self.csv_header, valid_header_types):
+            raise ValueError(
+                "CSV header must be 'infer', an integer index, a sequence of integers, or None."
+            )
+
+        if isinstance(self.csv_header, str) and self.csv_header != "infer":
+            raise ValueError(
+                "CSV header must be 'infer', an integer index, a sequence of integers, or None."
+            )
+
+        if isinstance(self.csv_header, (list, tuple)):
+            if not self.csv_header:
+                raise ValueError("CSV header index list cannot be empty.")
+            for header_value in self.csv_header:
+                if not isinstance(header_value, int):
+                    raise ValueError("CSV header sequence must contain only integers.")
+            if isinstance(self.csv_header, tuple):
+                self.csv_header = list(self.csv_header)
 
 
 @dataclass
@@ -262,6 +290,8 @@ class AlligatorConfig:
         save_output_to_csv: bool = True,
         correct_qids: Optional[Dict[str, Union[str, List[str]]]] = None,
         dry_run: bool = False,
+        csv_separator: str = ",",
+        csv_header: Union[str, int, List[int], None] = "infer",
         # Worker configuration
         worker_batch_size: int = 64,
         num_workers: Optional[int] = None,
@@ -305,6 +335,8 @@ class AlligatorConfig:
             correct_qids=correct_qids or {},
             dry_run=dry_run,
             candidate_retrieval_only=kwargs.get("candidate_retrieval_only", False),
+            csv_separator=csv_separator,
+            csv_header=csv_header,
         )
 
         self.worker = WorkerConfig(

@@ -47,7 +47,11 @@ class DataManager(DatabaseAccessMixin):
                 raise ValueError("Input CSV path cannot be None")
             # Ensure we have a string path for pandas
             csv_path = str(self.config.data.input_csv)
-            sample = pd.read_csv(csv_path, nrows=32)
+            csv_kwargs = {
+                "sep": self.config.data.csv_separator,
+                "header": self.config.data.csv_header,
+            }
+            sample = pd.read_csv(csv_path, nrows=32, **csv_kwargs)
             total_rows = -1
             is_csv_path = True
 
@@ -148,7 +152,11 @@ class DataManager(DatabaseAccessMixin):
                     self.config.data.input_csv, pd.DataFrame
                 ):
                     csv_path = str(self.config.data.input_csv)
-                    yield pd.read_csv(csv_path, nrows=1), 0
+                    csv_kwargs = {
+                        "sep": self.config.data.csv_separator,
+                        "header": self.config.data.csv_header,
+                    }
+                    yield pd.read_csv(csv_path, nrows=1, **csv_kwargs), 0
             else:
                 if isinstance(self.config.data.input_csv, pd.DataFrame):
                     yield self.config.data.input_csv.iloc[:1], 0
@@ -160,7 +168,11 @@ class DataManager(DatabaseAccessMixin):
                     self.config.data.input_csv, pd.DataFrame
                 ):
                     csv_path = str(self.config.data.input_csv)
-                    for chunk in pd.read_csv(csv_path, chunksize=chunk_size):
+                    csv_kwargs = {
+                        "sep": self.config.data.csv_separator,
+                        "header": self.config.data.csv_header,
+                    }
+                    for chunk in pd.read_csv(csv_path, chunksize=chunk_size, **csv_kwargs):
                         yield chunk, row_count
                         row_count += len(chunk)
             else:
