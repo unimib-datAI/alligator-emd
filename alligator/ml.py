@@ -209,7 +209,7 @@ class MLWorker(DatabaseAccessMixin):
         # 4) ML predictions
         features_array = np.array(all_candidates).astype(np.float32)
         ml_scores = model.predict(features_array, batch_size=256)[:, 1]
-
+        print(f"ml step 4 scores {ml_scores}")
         # 5) Assign scores and prepare updates
         docs_by_id = {doc["_id"]: doc for doc in batch_docs}
         score_map: Dict[Any, Dict[Any, Dict[int, float]]] = {}
@@ -228,17 +228,85 @@ class MLWorker(DatabaseAccessMixin):
                 col_cands = candidates_by_column[col_id]
                 for c_idx, scr in cdict.items():
                     col_cands[c_idx]["score"] = scr
+
+                # Normalize scores per cell using relative-to-max:
+                #   norm_score = raw_score / max_raw_score
+                # Top candidate always gets 1.0; others are proportional.
+                # MATCH_THRESHOLD on norm_score means "accept if >= X% as confident as the best".
+                # RAW_MIN_CONFIDENCE guards against matching when the whole cell is uncertain.
+                raw_scores = [c.get("score", 0.0) for c in col_cands]
+                for c, s in zip(col_cands, raw_scores):
+                    c["raw_score"] = s
+
+                try:
+                    RAW_MIN_CONFIDENCE = float(os.environ.get("RAW_MIN_CONFIDENCE", "0.1"))
+                except Exception:
+                    RAW_MIN_CONFIDENCE = 0.1
+
+                max_raw = max(raw_scores) if raw_scores else 0.0
+                if max_raw > 0:
+                    norms = [s / max_raw for s in raw_scores]
+                else:
+                    norms = [0.0] * len(raw_scores)
+
+                # If the cell's best raw score is below the confidence floor,
+                # treat all normalized scores as 0 (no confident match available).
+                if max_raw < RAW_MIN_CONFIDENCE:
+                    norms = [0.0] * len(norms)
+
+                for c, n in zip(col_cands, norms):
+                    c["score"] = n
+                    c["score_norm"] = n
+
                 sorted_cands = sorted(col_cands, key=lambda x: x.get("score", 0.0), reverse=True)
                 if self.stage == "rerank":
-                    if self.max_candidates_in_result > 0:
-                        cands_to_save = sorted_cands[: self.max_candidates_in_result]
+                    # Prefer candidates with a non-zero score, but if ALL scores are 0
+                    # (e.g. cell confidence below RAW_MIN_CONFIDENCE) still keep the top N
+                    # so the response always includes candidates (marked as non-matching).
+                    non_zero_sorted = [c for c in sorted_cands if c.get("score", 0.0) != 0]
+                    if non_zero_sorted:
+                        candidate_pool = non_zero_sorted
                     else:
-                        cands_to_save = sorted_cands
+                        # Restore original raw scores so the returned candidates have
+                        # meaningful scores instead of all-zeros.
+                        for c in sorted_cands:
+                            c["score"] = c.get("raw_score", 0.0)
+                        candidate_pool = sorted(
+                            sorted_cands, key=lambda x: x.get("score", 0.0), reverse=True
+                        )
+                    if self.max_candidates_in_result > 0:
+                        cands_to_save = candidate_pool[: self.max_candidates_in_result]
+                    else:
+                        cands_to_save = candidate_pool
+
+                    # Compute per-cell match decision (threshold + margin)
+                    try:
+                        MATCH_THRESHOLD = float(os.environ.get("MATCH_THRESHOLD", "0.4"))
+                    except Exception:
+                        MATCH_THRESHOLD = 0.5
+                    try:
+                        MARGIN_DELTA = float(os.environ.get("MATCH_MARGIN_DELTA", "0.9"))
+                    except Exception:
+                        MARGIN_DELTA = 0.1
+
+                    # Only the top candidate can be match=True; all others are always False.
+                    if cands_to_save:
+                        top_score = cands_to_save[0].get("score", 0.0)
+                        second_score = (
+                            cands_to_save[1].get("score", 0.0) if len(cands_to_save) > 1 else 0.0
+                        )
+                        top_auto_match = (top_score >= MATCH_THRESHOLD) or (
+                            (top_score - second_score) >= MARGIN_DELTA
+                        )
+                        for cand in cands_to_save:
+                            cand["match"] = False
+                        cands_to_save[0]["match"] = top_auto_match
+
                     cea_results[col_id] = [
                         {
                             k: v
                             for k, v in cand.items()
-                            if k in {"score", "id", "name", "description", "types"}
+                            if k in {"score", "id", "name", "description", "types", "match"}
                         }
                         for cand in cands_to_save
                     ]
@@ -252,12 +320,22 @@ class MLWorker(DatabaseAccessMixin):
                         keys = keys_with_max_count(pred_freq)
                         if len(keys) == 0:
                             continue
-                        cpa_results[col_id][col_id_rel] = keys
+                        # include id and score for each selected predicate
+                        cpa_results[col_id][col_id_rel] = [
+                            {"id": k, "score": float(pred_freq.get(k, 0))} for k in keys
+                        ]
+
+                # Decide which candidate list to persist: for rerank stage persist only
+                # the truncated `cands_to_save` (if applicable), otherwise persist full list.
+                if self.stage == "rerank":
+                    persist_cands = cands_to_save
+                else:
+                    persist_cands = sorted_cands
 
                 cand_updates.append(
                     UpdateOne(
                         {"row_id": str(doc["row_id"]), "col_id": str(col_id), "owner_id": doc_id},
-                        {"$set": {"candidates": sorted_cands}},
+                        {"$set": {"candidates": persist_cands}},
                     )
                 )
 
