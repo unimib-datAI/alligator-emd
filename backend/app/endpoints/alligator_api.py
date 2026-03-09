@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,7 @@ from bson import ObjectId
 from column_classifier import ColumnClassifier  # added global import
 from dependencies import get_alligator_db, get_db
 from endpoints.imdb_example import IMDB_EXAMPLE  # Example input
+from endpoints.response_formatter import build_table_response
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -21,21 +22,43 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError  # added import
+import requests
+import time
 
 from alligator import Alligator
+from schemas import (
+    DatasetCreate,
+    DatasetCreateResponse,
+    DatasetsListResponse,
+    TableAddedResponse,
+    TableDataEnvelope,
+    TablesListResponse,
+)
 
 router = APIRouter()
 
 
 class TableUpload(BaseModel):
-    table_name: str
-    header: List[str]
-    total_rows: int
-    classified_columns: Optional[Dict[str, Dict[str, str]]] = {}
-    data: List[dict]
+    """JSON body for uploading a table."""
+
+    table_name: str = Field(..., description="Unique table name within the dataset")
+    header: List[str] = Field(..., description="List of column names in order")
+    total_rows: int = Field(..., description="Total number of data rows")
+    classified_columns: Optional[Dict[str, Any]] = Field(
+        default={},
+        description=(
+            "Optional pre-computed column classifications (NE / LIT / IGNORED maps). "
+            "If omitted or empty, the ColumnClassifier model is invoked automatically."
+        ),
+    )
+    data: List[dict] = Field(..., description="Table rows as a list of objects")
+
+    model_config = {
+        "json_schema_extra": {"example": IMDB_EXAMPLE}
+    }
 
 
 # Add helper function to format classification results
@@ -55,15 +78,29 @@ def format_classification(raw_classification: dict, header: list) -> dict:
     return {"NE": ne, "LIT": lit, "IGNORED": ignored}
 
 
-@router.post("/dataset/{datasetName}/table/json", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/dataset/{datasetName}/table/json",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TableAddedResponse,
+    tags=["tables"],
+    summary="Upload table (JSON)",
+    responses={
+        201: {"description": "Table created and annotation queued."},
+        400: {"description": "Table already exists or duplicate dataset insertion."},
+    },
+)
 def add_table(
     datasetName: str,
-    table_upload: TableUpload = Body(..., example=IMDB_EXAMPLE),
+    table_upload: TableUpload = Body(...),
     background_tasks: BackgroundTasks = None,
     db: Database = Depends(get_db),
 ):
     """
-    Add a new table to an existing dataset and trigger Alligator processing in the background.
+    Upload a table as a JSON payload to an existing (or auto-created) dataset and
+    trigger Alligator semantic-annotation processing in the background.
+
+    If `classified_columns` is omitted or empty, the built-in
+    **ColumnClassifier** model is automatically invoked to infer column types.
     """
     # Check if dataset exists; if not, create it
     dataset = db.datasets.find_one({"dataset_name": datasetName})  # updated query key
@@ -115,22 +152,37 @@ def add_table(
         {"_id": dataset_id}, {"$inc": {"total_tables": 1, "total_rows": table_upload.total_rows}}
     )
 
+    # Capture names now so the closure doesn't hold the request-scoped db.
+    _dataset_name = datasetName
+    _table_name = table_upload.table_name
+
     # Trigger background task with classification passed to Alligator
     def run_alligator_task():
         gator = Alligator(
             input_csv=pd.DataFrame(table_upload.data),
-            dataset_name=datasetName,
-            table_name=table_upload.table_name,
+            dataset_name=_dataset_name,
+            table_name=_table_name,
             max_candidates=3,
             entity_retrieval_endpoint=os.environ.get("ENTITY_RETRIEVAL_ENDPOINT"),
             entity_retrieval_token=os.environ.get("ENTITY_RETRIEVAL_TOKEN"),
             max_workers=8,
-            candidate_retrieval_limit=10,
+            candidate_retrieval_limit=30,
             model_path="./alligator/models/default.h5",
             save_output_to_csv=False,
             columns_type=classification,
         )
         gator.run()
+        # Mark the table as fully annotated so polling clients can detect completion.
+        # Open a fresh connection — the request-scoped db is already closed at this point.
+        from pymongo import MongoClient as _MongoClient
+        _client = _MongoClient(os.environ.get("MONGO_URI", "mongodb://gator-mongodb:27017"))
+        try:
+            _client["alligator_backend_db"].tables.update_one(
+                {"dataset_name": _dataset_name, "table_name": _table_name},
+                {"$set": {"status": "DONE", "completed_at": datetime.now()}},
+            )
+        finally:
+            _client.close()
 
     background_tasks.add_task(run_alligator_task)
 
@@ -148,15 +200,32 @@ def parse_json_column_classification(column_classification: str = Form("")) -> O
     return json.loads(column_classification)
 
 
-@router.post("/dataset/{datasetName}/table/csv", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/dataset/{datasetName}/table/csv",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TableAddedResponse,
+    tags=["tables"],
+    summary="Upload table (CSV)",
+    responses={
+        201: {"description": "Table created and annotation queued."},
+        400: {"description": "Table already exists or duplicate dataset insertion."},
+    },
+)
 def add_table_csv(
     datasetName: str,
-    table_name: str,
-    file: UploadFile = File(...),
-    column_classification: Optional[dict] = Depends(parse_json_column_classification),  # SON/dict
+    table_name: str = Query(..., description="Unique table name within the dataset"),
+    file: UploadFile = File(..., description="CSV file to upload"),
+    column_classification: Optional[dict] = Depends(parse_json_column_classification),
     background_tasks: BackgroundTasks = None,
     db: Database = Depends(get_db),
 ):
+    """
+    Upload a table as a **CSV file** (multipart/form-data) to an existing (or
+    auto-created) dataset and trigger Alligator semantic-annotation in the background.
+
+    Optionally supply `column_classification` as a JSON string form-field to
+    override automatic column-type detection.
+    """
     # Read CSV file and convert NaN values to None
     df = pd.read_csv(file.file)
     df = df.replace({np.nan: None})  # permanent fix for JSON serialization
@@ -198,6 +267,7 @@ def add_table_csv(
         "header": header,
         "total_rows": total_rows,
         "created_at": datetime.now(),
+        "status": "processing",
         "classified_columns": classification,  # updated field for CSV input
     }
     try:
@@ -222,12 +292,23 @@ def add_table_csv(
             entity_retrieval_endpoint=os.environ.get("ENTITY_RETRIEVAL_ENDPOINT"),
             entity_retrieval_token=os.environ.get("ENTITY_RETRIEVAL_TOKEN"),
             max_workers=8,
-            candidate_retrieval_limit=10,
+            candidate_retrieval_limit=30,
             model_path="./alligator/models/default.h5",
             save_output_to_csv=False,
             columns_type=classification,
         )
         gator.run()
+        # Mark the table as fully annotated so polling clients can detect completion.
+        # Open a fresh connection — the request-scoped db is already closed at this point.
+        from pymongo import MongoClient as _MongoClient
+        _client = _MongoClient(os.environ.get("MONGO_URI", "mongodb://gator-mongodb:27017"))
+        try:
+            _client["alligator_backend_db"].tables.update_one(
+                {"dataset_name": datasetName, "table_name": table_name},
+                {"$set": {"status": "DONE", "completed_at": datetime.now()}},
+            )
+        finally:
+            _client.close()
 
     background_tasks.add_task(run_alligator_task)
 
@@ -238,12 +319,27 @@ def add_table_csv(
     }
 
 
-@router.get("/datasets")
+@router.get(
+    "/datasets",
+    response_model=DatasetsListResponse,
+    tags=["datasets"],
+    summary="List datasets",
+    responses={
+        200: {"description": "Paginated list of datasets."},
+        400: {"description": "Invalid cursor value."},
+    },
+)
 def get_datasets(
-    limit: int = Query(10), cursor: Optional[str] = Query(None), db: Database = Depends(get_db)
+    limit: int = Query(10, ge=1, le=200, description="Maximum number of datasets to return"),
+    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen document)"),
+    db: Database = Depends(get_db),
 ):
     """
-    Get datasets with keyset pagination, using ObjectId as the cursor.
+    Return a paginated list of all datasets.
+
+    Results are sorted by internal MongoDB `_id` (ascending).  Pass the
+    `next_cursor` value from one response as the `cursor` query parameter in
+    the next request to fetch the following page.
     """
     query_filter = {}
     if cursor:
@@ -271,15 +367,28 @@ def get_datasets(
     }
 
 
-@router.get("/datasets/{dataset_name}/tables")
+@router.get(
+    "/datasets/{dataset_name}/tables",
+    response_model=TablesListResponse,
+    tags=["tables"],
+    summary="List tables in a dataset",
+    responses={
+        200: {"description": "Paginated list of tables belonging to the dataset."},
+        400: {"description": "Invalid cursor value."},
+        404: {"description": "Dataset not found."},
+    },
+)
 def get_tables(
     dataset_name: str,
-    limit: int = Query(10),
-    cursor: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=200, description="Maximum number of tables to return"),
+    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen document)"),
     db: Database = Depends(get_db),
 ):
     """
-    Get tables for a dataset with keyset pagination, using ObjectId as the cursor.
+    Return a paginated list of tables that belong to `dataset_name`.
+
+    Each entry includes table-level metadata such as `status`, `total_rows`,
+    `header` and `classified_columns`.
     """
     # Ensure dataset exists
     if not db.datasets.find_one({"dataset_name": dataset_name}):  # updated query key
@@ -314,18 +423,38 @@ def get_tables(
     }
 
 
-@router.get("/datasets/{dataset_name}/tables/{table_name}")
+@router.get(
+    "/datasets/{dataset_name}/tables/{table_name}",
+    response_model=TableDataEnvelope,
+    tags=["tables"],
+    summary="Get annotated table data",
+    responses={
+        200: {"description": "Paginated table rows with semantic annotations (CEA / CPA / CTA)."},
+        400: {"description": "Invalid cursor value."},
+        404: {"description": "Dataset or table not found."},
+        500: {"description": "Internal error while formatting the table response."},
+    },
+)
 def get_table(
     dataset_name: str,
     table_name: str,
-    limit: int = Query(10),
-    cursor: Optional[str] = Query(None),
+    limit: int = Query(
+        10,
+        description="Rows per page. Pass 0 or a negative value to return all rows (no pagination).",
+    ),
+    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen row)"),
     db: Database = Depends(get_db),
     alligator_db: Database = Depends(get_alligator_db),
 ):
     """
-    Get table data with keyset pagination, using ObjectId as the cursor.
-    Returns *all* candidate entities for each column that has any.
+    Return annotated rows for a single table together with full semantic
+    annotations:
+
+    * **CEA** – Cell-Entity Annotations (entity candidates per cell).
+    * **CPA** – Column-Property Annotations (predicates between column pairs).
+    * **CTA** – Column-Type Annotations (Wikidata types per NE column).
+
+    Use `limit` and `cursor` for cursor-based pagination.
     """
     # Check dataset
     if not db.datasets.find_one({"dataset_name": dataset_name}):  # updated query key
@@ -349,80 +478,87 @@ def get_table(
             raise HTTPException(status_code=400, detail="Invalid cursor value")
 
     # Fetch rows from the Alligator-processed data
-    results = alligator_db.input_data.find(query_filter).sort("_id", 1).limit(limit)
+    finder = alligator_db.input_data.find(query_filter).sort("_id", 1)
+    # if limit <= 0 return all rows (no pagination)
+    if limit and int(limit) > 0:
+        results = finder.limit(limit)
+    else:
+        results = finder
     raw_rows = list(results)
-
-    # Build a cleaned-up response with *all* candidates
-    rows_formatted = []
-    for row in raw_rows:
-        linked_entities = []
-        el_results = row.get("cea", {})
-
-        # For each column, gather all candidates
-        for col_index in range(len(header)):
-            candidates = el_results.get(str(col_index), [])
-            if candidates:
-                linked_entities.append({"idColumn": col_index, "candidates": candidates})
-
-        rows_formatted.append(
-            {
-                "idRow": row.get("row_id"),
-                "data": row.get("data", []),
-                "linked_entities": linked_entities,
-            }
-        )
-
-    # Determine next cursor
-    next_cursor = str(raw_rows[-1]["_id"]) if raw_rows else None
-    return {
-        "data": {
-            "datasetName": dataset_name,
-            "tableName": table.get("table_name"),
-            "header": header,
-            "rows": rows_formatted,
-        },
-        "pagination": {"next_cursor": next_cursor},
-    }
+    # Delegate formatting and aggregation to the response formatter
+    try:
+        response = build_table_response(raw_rows, table, dataset_name, header)
+    except Exception as e:
+        print(f"Error building table response: {e}")
+        raise HTTPException(status_code=500, detail="Failed to format table response")
+    # keep previous API shape for compatibility: wrap under `data`
+    return {"data": response}
 
 
-@router.post("/datasets", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/datasets",
+    status_code=status.HTTP_201_CREATED,
+    response_model=DatasetCreateResponse,
+    tags=["datasets"],
+    summary="Create dataset",
+    responses={
+        201: {"description": "Dataset created successfully."},
+        400: {"description": "A dataset with the given name already exists."},
+    },
+)
 def create_dataset(
-    dataset_data: dict = Body(..., example={"dataset_name": "test"}),  # updated example key
+    dataset_data: DatasetCreate = Body(...),
     db: Database = Depends(get_db),
 ):
     """
-    Create a new dataset.
+    Create a new, empty dataset.
+
+    The `dataset_name` must be unique across all datasets.  Once created, tables
+    can be uploaded via the `/dataset/{datasetName}/table/json` or
+    `/dataset/{datasetName}/table/csv` endpoints.
     """
+    dataset_dict = dataset_data.model_dump()
     existing = db.datasets.find_one(
-        {"dataset_name": dataset_data.get("dataset_name")}
+        {"dataset_name": dataset_dict.get("dataset_name")}
     )  # updated query key
     if existing:
         raise HTTPException(
             status_code=400,
-            detail=f"Dataset with dataset_name {dataset_data.get('dataset_name')} already exists",
+            detail=f"Dataset with dataset_name {dataset_dict.get('dataset_name')} already exists",
         )
 
-    dataset_data["created_at"] = datetime.now()
-    dataset_data["total_tables"] = 0
-    dataset_data["total_rows"] = 0
+    dataset_dict["created_at"] = datetime.now()
+    dataset_dict["total_tables"] = 0
+    dataset_dict["total_rows"] = 0
 
     try:
-        result = db.datasets.insert_one(dataset_data)
+        result = db.datasets.insert_one(dataset_dict)
     except DuplicateKeyError:
         raise HTTPException(status_code=400, detail="Dataset already exists")
-    dataset_data["_id"] = str(result.inserted_id)
+    dataset_dict["_id"] = str(result.inserted_id)
 
-    return {"message": "Dataset created successfully", "dataset": dataset_data}
+    return {"message": "Dataset created successfully", "dataset": dataset_dict}
 
 
-@router.delete("/datasets/{dataset_name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/datasets/{dataset_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["datasets"],
+    summary="Delete dataset",
+    responses={
+        204: {"description": "Dataset and all its tables deleted."},
+        404: {"description": "Dataset not found."},
+    },
+)
 def delete_dataset(
     dataset_name: str,
     db: Database = Depends(get_db),
     alligator_db: Database = Depends(get_alligator_db),
 ):
     """
-    Delete a dataset by name.
+    Permanently delete a dataset and **all tables** that belong to it.
+
+    This operation is irreversible.
     """
     # Check existence using uniform dataset key
     existing = db.datasets.find_one({"dataset_name": dataset_name})  # updated query key
@@ -440,11 +576,21 @@ def delete_dataset(
 
 
 @router.delete(
-    "/datasets/{dataset_name}/tables/{table_name}", status_code=status.HTTP_204_NO_CONTENT
+    "/datasets/{dataset_name}/tables/{table_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["tables"],
+    summary="Delete table",
+    responses={
+        204: {"description": "Table deleted."},
+        404: {"description": "Dataset or table not found."},
+    },
 )
 def delete_table(dataset_name: str, table_name: str, db: Database = Depends(get_db)):
     """
-    Delete a table by name within a dataset.
+    Permanently delete a single table from a dataset.
+
+    The parent dataset's `total_tables` and `total_rows` counters are updated
+    automatically.  This operation is irreversible.
     """
     # Ensure dataset exists using uniform dataset key
     dataset = db.datasets.find_one({"dataset_name": dataset_name})  # updated query key
