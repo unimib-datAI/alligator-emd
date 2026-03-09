@@ -182,7 +182,7 @@ class RetrievalConfig:
     entity_retrieval_token: Optional[str] = None
     object_retrieval_endpoint: Optional[str] = None
     literal_retrieval_endpoint: Optional[str] = None
-    candidate_retrieval_limit: int = 16
+    candidate_retrieval_limit: int = 20
     max_candidates_in_result: int = 5
     http_session_limit: int = 32
     http_session_ssl_verify: bool = False
@@ -300,7 +300,7 @@ class AlligatorConfig:
         entity_retrieval_token: Optional[str] = None,
         object_retrieval_endpoint: Optional[str] = None,
         literal_retrieval_endpoint: Optional[str] = None,
-        candidate_retrieval_limit: int = 16,
+        candidate_retrieval_limit: int = 20,
         max_candidates_in_result: int = 5,
         http_session_limit: int = 32,
         http_session_ssl_verify: bool = False,
