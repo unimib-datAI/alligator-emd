@@ -81,7 +81,7 @@ class DataManager(DatabaseAccessMixin):
 
     def _classify_columns(self, sample: pd.DataFrame) -> Dict[str, str]:
         """Classify columns using the column classifier."""
-        classifier = ColumnClassifier(model_type="fast")
+        classifier = ColumnClassifier(model_type="accurate")
         classification_results = classifier.classify_multiple_tables([sample])
         table_classification = classification_results[0].get("table_1", {})
 

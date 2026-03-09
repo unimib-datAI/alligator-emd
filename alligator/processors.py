@@ -58,6 +58,32 @@ class RowBatchProcessor(DatabaseAccessMixin):
         self.mongo_wrapper = MongoWrapper(self._mongo_uri, self._db_name)
         self.logger = get_logger("processors")
 
+    def _map_ner_type(self, raw_ner: object) -> str | None:
+        """Normalize various NER labels to one of LOC, ORG, PERS, OTHERS or None.
+
+        Examples handled: 'LOCATION', 'loc', 'GPE' -> 'LOC';
+        'ORGANIZATION', 'org' -> 'ORG';
+        'PERSON', 'PER' -> 'PERS'; everything else -> 'OTHERS'.
+        """
+        if raw_ner is None:
+            return None
+        try:
+            s = str(raw_ner).strip().lower()
+        except Exception:
+            return None
+
+        if not s:
+            return None
+
+        if any(k in s for k in ("loc", "location", "gpe", "place", "geo")):
+            return "LOC"
+        if any(k in s for k in ("org", "organization", "organisation", "company", "institution")):
+            return "ORG"
+        if any(k in s for k in ("person", "pers", "per", "name")):
+            return "PERS"
+
+        return "OTHERS"
+
     async def process_rows_batch(self, docs):
         """
         Orchestrates the overall flow:
@@ -119,12 +145,14 @@ class RowBatchProcessor(DatabaseAccessMixin):
                     continue
 
                 qids = correct_qids.get(f"{row_index}-{normalized_col}", [])
+                mapped_ner = self._map_ner_type(ner_type)
                 entity = Entity(
                     value=cell_value,
                     row_index=row_index,
                     col_index=normalized_col,
                     correct_qids=qids,
                     fuzzy=False,
+                    ner_type=mapped_ner,
                 )
                 entities.append(entity)
 
@@ -141,18 +169,21 @@ class RowBatchProcessor(DatabaseAccessMixin):
             # Get column types for this entity's column
             column_types = self.column_types.get(entity.col_index, [])
             types_key = tuple(sorted(column_types))
-            fetch_key = (entity.value, entity.fuzzy, qids_key, types_key)
+            ner_key = entity.ner_type or ""
+            fetch_key = (entity.value, entity.fuzzy, qids_key, types_key, ner_key)
             fetch_groups.add(fetch_key)
 
         unique_entities = []
         unique_fuzzies = []
         unique_qids = []
         unique_types = []
-        for value, fuzzy, qids_tuple, types_tuple in fetch_groups:
+        unique_ner_types = []
+        for value, fuzzy, qids_tuple, types_tuple, ner_type in fetch_groups:
             unique_entities.append(value)
             unique_fuzzies.append(fuzzy)
             unique_qids.append(list(qids_tuple))
             unique_types.append(list(types_tuple))
+            unique_ner_types.append(ner_type if ner_type != "" else None)
 
         self.logger.info(
             f"Fetching candidates for {len(unique_entities)} distinct mentions "
@@ -164,13 +195,20 @@ class RowBatchProcessor(DatabaseAccessMixin):
             fuzzies=unique_fuzzies,
             qids=unique_qids,
             types=unique_types,
+            ner_types=unique_ner_types,
         )
 
         retry_fetch_groups = set()
-        for value, fuzzy, qids_tuple, types_tuple in fetch_groups:
+        for value, fuzzy, qids_tuple, types_tuple, ner_type in fetch_groups:
             retrieved_candidates = initial_results.get(value, [])
             if self.fuzzy_retry and not fuzzy and len(retrieved_candidates) < 1:
-                retry_key = (value, True, qids_tuple, types_tuple)  # fuzzy=True for retry
+                retry_key = (
+                    value,
+                    True,
+                    qids_tuple,
+                    types_tuple,
+                    ner_type,
+                )  # fuzzy=True for retry
                 retry_fetch_groups.add(retry_key)
 
         if retry_fetch_groups:
@@ -178,11 +216,13 @@ class RowBatchProcessor(DatabaseAccessMixin):
             retry_fuzzies = []
             retry_qids = []
             retry_types = []
-            for value, fuzzy, qids_tuple, types_tuple in retry_fetch_groups:
+            retry_ner_types = []
+            for value, fuzzy, qids_tuple, types_tuple, ner_type in retry_fetch_groups:
                 retry_entities.append(value)
                 retry_fuzzies.append(fuzzy)
                 retry_qids.append(list(qids_tuple))
                 retry_types.append(list(types_tuple))
+                retry_ner_types.append(ner_type if ner_type != "" else None)
 
             self.logger.info(f"Performing fuzzy retry for {len(retry_entities)} distinct mentions")
 
@@ -191,6 +231,7 @@ class RowBatchProcessor(DatabaseAccessMixin):
                 fuzzies=retry_fuzzies,
                 qids=retry_qids,
                 types=retry_types,
+                ner_types=retry_ner_types,
             )
 
             for value in retry_entities:

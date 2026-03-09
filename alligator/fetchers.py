@@ -70,6 +70,7 @@ class CandidateFetcher(DatabaseAccessMixin):
         fuzzies: List[bool],
         qids: List[List[str]],
         types: Optional[List[List[str]]] = None,
+        ner_types: Optional[List[Optional[str]]] = None,
     ) -> Dict[str, List[dict]]:
         """
         Fetch candidates for multiple entities in a batch.
@@ -85,7 +86,9 @@ class CandidateFetcher(DatabaseAccessMixin):
         """
         if types is None:
             types = [[] for _ in entities]
-        return await self.fetch_candidates_batch_async(entities, fuzzies, qids, types)
+        if ner_types is None:
+            ner_types = [None for _ in entities]
+        return await self.fetch_candidates_batch_async(entities, fuzzies, qids, types, ner_types)
 
     async def _fetch_candidates(
         self,
@@ -93,6 +96,7 @@ class CandidateFetcher(DatabaseAccessMixin):
         fuzzy,
         qid,
         types: Optional[str] = None,
+        ner_type: Optional[str] = None,
         use_cache: bool = False,
         kind: str = "entity",
     ) -> tuple[str, List[dict]]:
@@ -100,6 +104,8 @@ class CandidateFetcher(DatabaseAccessMixin):
         This used to be Alligator._fetch_candidates. Logic unchanged.
         """
         encoded_entity_name = quote(entity_name)
+        if "zeeuws" in encoded_entity_name:
+            print(f"entity name {encoded_entity_name} - kind {kind} - types {ner_type}")
         url = (
             f"{self.endpoint}?name={encoded_entity_name}"
             f"&limit={self.num_candidates}&fuzzy={fuzzy}"
@@ -111,6 +117,8 @@ class CandidateFetcher(DatabaseAccessMixin):
             url += f"&ids={qid}"
         if types:
             url += f"&types={types}"
+        if ner_type in ["PER", "LOC"]:
+            url += f"&NERtype={quote(ner_type)}"
 
         backoff = 1
         for attempts in range(5):
@@ -118,14 +126,28 @@ class CandidateFetcher(DatabaseAccessMixin):
                 async with self.session.get(url) as response:
                     response.raise_for_status()
                     fetched_candidates = await response.json()
+                    if "zeeuws" in encoded_entity_name:
+                        print(f"fetched candidates {fetched_candidates}")
+                    # Filter candidates by NER type when requested. Materialize to list
+                    # so we can call len() and modify it safely.
+                    if ner_type == "ORG":
+                        filtered_candidates = [
+                            cand
+                            for cand in fetched_candidates
+                            if cand.get("NERtype") in ("LOC", "ORG")
+                        ]
+                    else:
+                        filtered_candidates = list(fetched_candidates)
+                    if "zeeuws" in encoded_entity_name:
+                        print(f"filtered candidates {filtered_candidates}")
 
                     # Ensure all QIDs are included by adding placeholders for missing ones
                     required_qids = qid.split() if qid else []
-                    existing_qids = {c["id"] for c in fetched_candidates if c.get("id")}
+                    existing_qids = {c["id"] for c in filtered_candidates if c.get("id")}
                     missing_qids = set(required_qids) - existing_qids
 
                     for missing_qid in missing_qids:
-                        fetched_candidates.append(
+                        filtered_candidates.append(
                             {
                                 "id": missing_qid,
                                 "name": None,
@@ -145,11 +167,12 @@ class CandidateFetcher(DatabaseAccessMixin):
                             fuzzy=fuzzy,
                             qid=qid,
                             types=types or "",
+                            ner_type=ner_type or "",
                             kind=kind,
                         )
-                        cache.put(cache_key, fetched_candidates)
+                        cache.put(cache_key, filtered_candidates)
 
-                    return entity_name, fetched_candidates
+                    return entity_name, filtered_candidates
 
             except Exception:
                 if attempts == 4:
@@ -166,19 +189,28 @@ class CandidateFetcher(DatabaseAccessMixin):
         return entity_name, []
 
     async def fetch_candidates_batch_async(
-        self, entities, fuzzies, qids: List[List[str]], types: Optional[List[List[str]]] = None
+        self,
+        entities,
+        fuzzies,
+        qids: List[List[str]],
+        types: Optional[List[List[str]]] = None,
+        ner_types: Optional[List[Optional[str]]] = None,
     ):
         """
         This used to be Alligator.fetch_candidates_batch_async.
         """
         if types is None:
             types = [[] for _ in entities]
+        if ner_types is None:
+            ner_types = [None for _ in entities]
 
         results = {}
         to_fetch = []
 
         # Decide which entities need to be fetched
-        for entity_name, fuzzy, entity_qids, entity_types in zip(entities, fuzzies, qids, types):
+        for entity_name, fuzzy, entity_qids, entity_types, ner_type in zip(
+            entities, fuzzies, qids, types, ner_types
+        ):
             qid_str = " ".join(entity_qids) if entity_qids else ""
             types_str = " ".join(entity_types) if entity_types else ""
 
@@ -191,6 +223,7 @@ class CandidateFetcher(DatabaseAccessMixin):
                     fuzzy=fuzzy,
                     qid=qid_str,
                     types=types_str,
+                    ner_type=ner_type or "",
                     kind="entity",
                 )
                 cached_result = cache.get(cache_key)
@@ -203,18 +236,19 @@ class CandidateFetcher(DatabaseAccessMixin):
                     if all(q in cached_qids for q in entity_qids):
                         results[entity_name] = cached_result
                     else:
-                        to_fetch.append((entity_name, fuzzy, qid_str, types_str))
+                        to_fetch.append((entity_name, fuzzy, qid_str, types_str, ner_type))
                 else:
                     results[entity_name] = cached_result
+                # print(f"cached results {results}")
             else:
-                to_fetch.append((entity_name, fuzzy, qid_str, types_str))
+                to_fetch.append((entity_name, fuzzy, qid_str, types_str, ner_type))
 
         if not to_fetch:
             return self._remove_placeholders(results)
 
         tasks = []
-        for entity_name, fuzzy, qid_str, types_str in to_fetch:
-            tasks.append(self._fetch_candidates(entity_name, fuzzy, qid_str, types_str))
+        for entity_name, fuzzy, qid_str, types_str, ner_type in to_fetch:
+            tasks.append(self._fetch_candidates(entity_name, fuzzy, qid_str, types_str, ner_type))
         done = await asyncio.gather(*tasks, return_exceptions=False)
         for entity_name, candidates in done:
             results[entity_name] = candidates

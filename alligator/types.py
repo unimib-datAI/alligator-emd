@@ -29,6 +29,7 @@ class Entity:
     col_index: str  # Stored as string for consistency
     correct_qids: Optional[List[str]] = None
     fuzzy: bool = False
+    ner_type: Optional[str] = None
 
 
 @dataclass
