@@ -51,6 +51,7 @@ class Alligator:
         reranker_model_path: Optional[str] = None,
         ml_worker_batch_size: int = 256,
         num_ml_workers: int = 1,
+        ml_processor_id: str = "ml-processor",
         top_n_cta_cpa_freq: int = 3,
         doc_percentage_type_features: float = 1.0,
         save_output: bool = False,
@@ -86,6 +87,7 @@ class Alligator:
             reranker_model_path=reranker_model_path,
             ml_worker_batch_size=ml_worker_batch_size,
             num_ml_workers=num_ml_workers,
+            ml_processor_id=ml_processor_id,
             top_n_cta_cpa_freq=top_n_cta_cpa_freq,
             doc_percentage_type_features=doc_percentage_type_features,
             save_output=save_output,
@@ -151,9 +153,9 @@ class Alligator:
         self.literal_fetcher: Optional[LiteralFetcher] = None
         self.row_processor: Optional[RowBatchProcessor] = None
 
-    def run(self) -> List[Dict[str, Any]]:
+    def run(self, processor_id: str | None = None) -> List[Dict[str, Any]]:
         """Execute the entity linking pipeline using the coordinator."""
-        return self.coordinator.run()
+        return self.coordinator.run(processor_id=processor_id or self.config.ml.ml_processor_id)
 
     def close_mongo_connection(self):
         """Cleanup when instance is destroyed."""

@@ -218,6 +218,7 @@ class MLConfig:
     reranker_model_path: Optional[str] = None
     ml_worker_batch_size: int = 256
     num_ml_workers: int = 2
+    ml_processor_id: str = "ml-processor"
     selected_features: Optional[List[str]] = None
 
     def __post_init__(self):
@@ -309,6 +310,7 @@ class AlligatorConfig:
         reranker_model_path: Optional[str] = None,
         ml_worker_batch_size: int = 256,
         num_ml_workers: int = 2,
+        ml_processor_id: str = "ml-processor",
         selected_features: Optional[List[str]] = None,
         # Feature configuration
         top_n_cta_cpa_freq: int = 3,
@@ -360,6 +362,7 @@ class AlligatorConfig:
             reranker_model_path=reranker_model_path,
             ml_worker_batch_size=ml_worker_batch_size,
             num_ml_workers=num_ml_workers,
+            ml_processor_id=ml_processor_id,
             selected_features=selected_features,
         )
 

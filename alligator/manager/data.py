@@ -52,7 +52,9 @@ class DataManager(DatabaseAccessMixin):
                 "header": self.config.data.csv_header,
             }
             sample = pd.read_csv(csv_path, nrows=32, **csv_kwargs)
-            total_rows = -1
+            total_rows = sum(1 for _ in open(csv_path)) - (
+                1 if self.config.data.csv_header is not None else 0
+            )
             is_csv_path = True
 
         self.logger.info(

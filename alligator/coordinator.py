@@ -48,7 +48,7 @@ class AlligatorCoordinator:
             input_collection=config.database.input_collection,
         )
 
-    def run(self) -> List[Dict[str, Any]]:
+    def run(self, processor_id: str = "ml-processor") -> List[Dict[str, Any]]:
         """Execute the complete entity linking pipeline."""
         self.logger.info("Starting Alligator entity linking pipeline...")
 
@@ -70,7 +70,7 @@ class AlligatorCoordinator:
             # Step 3: ML pipeline
             self.logger.info("Step 3: Running ML pipeline...")
             tic = time.perf_counter()
-            self.ml_manager.run_ml_pipeline(self.feature)
+            self.ml_manager.run_ml_pipeline(self.feature, processor_id=processor_id)
             toc = time.perf_counter()
             self.logger.info(f"ML pipeline complete in {toc - tic:.2f}s")
 
