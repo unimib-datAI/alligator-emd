@@ -56,9 +56,7 @@ class TableUpload(BaseModel):
     )
     data: List[dict] = Field(..., description="Table rows as a list of objects")
 
-    model_config = {
-        "json_schema_extra": {"example": IMDB_EXAMPLE}
-    }
+    model_config = {"json_schema_extra": {"example": IMDB_EXAMPLE}}
 
 
 # Add helper function to format classification results
@@ -93,6 +91,10 @@ def add_table(
     datasetName: str,
     table_upload: TableUpload = Body(...),
     background_tasks: BackgroundTasks = None,
+    processor_id: Optional[str] = Query(
+        None,
+        description="Processor ID to use for annotation (e.g. 'ml-processor', 'llm-processor'). Defaults to the system default.",
+    ),
     db: Database = Depends(get_db),
 ):
     """
@@ -155,6 +157,7 @@ def add_table(
     # Capture names now so the closure doesn't hold the request-scoped db.
     _dataset_name = datasetName
     _table_name = table_upload.table_name
+    _processor_id = processor_id
 
     # Trigger background task with classification passed to Alligator
     def run_alligator_task():
@@ -171,10 +174,11 @@ def add_table(
             save_output_to_csv=False,
             columns_type=classification,
         )
-        gator.run()
+        gator.run(processor_id=_processor_id)
         # Mark the table as fully annotated so polling clients can detect completion.
         # Open a fresh connection — the request-scoped db is already closed at this point.
         from pymongo import MongoClient as _MongoClient
+
         _client = _MongoClient(os.environ.get("MONGO_URI", "mongodb://gator-mongodb:27017"))
         try:
             _client["alligator_backend_db"].tables.update_one(
@@ -216,6 +220,10 @@ def add_table_csv(
     table_name: str = Query(..., description="Unique table name within the dataset"),
     file: UploadFile = File(..., description="CSV file to upload"),
     column_classification: Optional[dict] = Depends(parse_json_column_classification),
+    processor_id: Optional[str] = Query(
+        None,
+        description="Processor ID to use for annotation (e.g. 'ml-processor', 'llm-processor'). Defaults to the system default.",
+    ),
     background_tasks: BackgroundTasks = None,
     db: Database = Depends(get_db),
 ):
@@ -297,10 +305,11 @@ def add_table_csv(
             save_output_to_csv=False,
             columns_type=classification,
         )
-        gator.run()
+        gator.run(processor_id=processor_id)
         # Mark the table as fully annotated so polling clients can detect completion.
         # Open a fresh connection — the request-scoped db is already closed at this point.
         from pymongo import MongoClient as _MongoClient
+
         _client = _MongoClient(os.environ.get("MONGO_URI", "mongodb://gator-mongodb:27017"))
         try:
             _client["alligator_backend_db"].tables.update_one(
@@ -331,7 +340,9 @@ def add_table_csv(
 )
 def get_datasets(
     limit: int = Query(10, ge=1, le=200, description="Maximum number of datasets to return"),
-    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen document)"),
+    cursor: Optional[str] = Query(
+        None, description="Pagination cursor (ObjectId of the last seen document)"
+    ),
     db: Database = Depends(get_db),
 ):
     """
@@ -381,7 +392,9 @@ def get_datasets(
 def get_tables(
     dataset_name: str,
     limit: int = Query(10, ge=1, le=200, description="Maximum number of tables to return"),
-    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen document)"),
+    cursor: Optional[str] = Query(
+        None, description="Pagination cursor (ObjectId of the last seen document)"
+    ),
     db: Database = Depends(get_db),
 ):
     """
@@ -442,7 +455,9 @@ def get_table(
         10,
         description="Rows per page. Pass 0 or a negative value to return all rows (no pagination).",
     ),
-    cursor: Optional[str] = Query(None, description="Pagination cursor (ObjectId of the last seen row)"),
+    cursor: Optional[str] = Query(
+        None, description="Pagination cursor (ObjectId of the last seen row)"
+    ),
     db: Database = Depends(get_db),
     alligator_db: Database = Depends(get_alligator_db),
 ):

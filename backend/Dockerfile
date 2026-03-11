@@ -11,13 +11,14 @@ COPY ./backend/app /app
 COPY pyproject.toml .
 COPY ./alligator ./alligator
 
-# Install Python dependencies
-RUN PIP_DEFAULT_TIMEOUT=100 pip install --no-cache-dir -e ".[app]"
+# Install Python dependencies and debug tooling
+RUN PIP_DEFAULT_TIMEOUT=100 pip install --no-cache-dir -e ".[app]" \
+	&& pip install --no-cache-dir debugpy && pip install openai
 
 # Expose the port that FastAPI will use
 EXPOSE 8000
 
-RUN python -m spacy download en_core_web_sm
+RUN python -m spacy download en_core_web_sm && python -m spacy download en_core_web_trf
 
 # Run the FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

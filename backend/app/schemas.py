@@ -55,11 +55,7 @@ class DatasetInfo(BaseModel):
 class DatasetCreate(BaseModel):
     dataset_name: str = Field(..., description="Unique name for the new dataset")
 
-    model_config = {
-        "json_schema_extra": {
-            "example": {"dataset_name": "my_dataset"}
-        }
-    }
+    model_config = {"json_schema_extra": {"example": {"dataset_name": "my_dataset"}}}
 
 
 class DatasetCreateResponse(BaseModel):
@@ -99,7 +95,9 @@ class TableInfo(BaseModel):
     header: List[str] = Field(..., description="Column names in order")
     total_rows: int = Field(..., description="Total number of rows in the table")
     created_at: Optional[str] = Field(None, description="ISO-formatted creation timestamp")
-    completed_at: Optional[str] = Field(None, description="ISO-formatted annotation completion timestamp")
+    completed_at: Optional[str] = Field(
+        None, description="ISO-formatted annotation completion timestamp"
+    )
     status: str = Field(..., description="Processing status: 'processing' | 'DONE'")
     classified_columns: Optional[ClassifiedColumns] = Field(
         None, description="Column type classification used by Alligator"
@@ -167,7 +165,9 @@ class EntityAnnotation(BaseModel):
     name: Optional[str] = Field(None, description="Entity label")
     score: Optional[float] = Field(None, description="Confidence score (0–1)")
     match: bool = Field(False, description="Whether this entity is considered the best match")
-    types: List[Dict[str, Any]] = Field(default_factory=list, description="Wikidata types of the entity")
+    types: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Wikidata types of the entity"
+    )
 
 
 class CEAAnnotation(BaseModel):
@@ -189,7 +189,9 @@ class CTAAnnotation(BaseModel):
 
 class SemanticAnnotations(BaseModel):
     cea: List[CEAAnnotation] = Field(default_factory=list, description="Cell-Entity Annotations")
-    cpa: List[CPAAnnotation] = Field(default_factory=list, description="Column-Property Annotations")
+    cpa: List[CPAAnnotation] = Field(
+        default_factory=list, description="Column-Property Annotations"
+    )
     cta: List[CTAAnnotation] = Field(default_factory=list, description="Column-Type Annotations")
 
 
