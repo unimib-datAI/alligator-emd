@@ -167,6 +167,7 @@ class EntityAnnotation(BaseModel):
     name: Optional[str] = Field(None, description="Entity label")
     score: Optional[float] = Field(None, description="Confidence score (0–1)")
     match: bool = Field(False, description="Whether this entity is considered the best match")
+    types: List[Dict[str, Any]] = Field(default_factory=list, description="Wikidata types of the entity")
 
 
 class CEAAnnotation(BaseModel):
