@@ -186,3 +186,9 @@ eval/results/
 tables/
 results/
 notebooks/
+
+node_modules/
+
+# Docusaurus build output
+documentation/build
+documentation/.docusaurus
