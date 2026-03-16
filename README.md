@@ -2,6 +2,8 @@
 
 <img src="logo.webp" alt="Alligator Logo" width="400"/>
 
+[![Docs](https://img.shields.io/badge/Docs-Online-blue)](https://unimib-datAI.github.io/alligator-emd/)
+
 **Alligator** is a powerful Python library designed for efficient entity linking over tabular data. Whether you're working with large datasets or need to resolve entities across multiple tables, Alligator provides a scalable and easy-to-integrate solution to streamline your data processing pipeline.
 
 ## Features
@@ -278,6 +280,8 @@ original_col_0,person_name_id,person_name_name,person_name_desc,person_name_scor
 ## Contributing
 
 Contributions are welcome! Please read the [contributing guidelines](CONTRIBUTING.md) first.
+
+
 
 ## License
 
