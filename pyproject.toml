@@ -7,18 +7,18 @@ name = "alligator"
 version = "0.1.0"
 description = "A package for entity linking using Alligator."
 authors = [
-    {name = "Roberto Avogadro", email = "roberto.avogadro@sintef.no"},
-    {name = "Federico Belotti", email = "belo.fede@outlook.com"},
+    { name = "Roberto Avogadro", email = "roberto.avogadro@sintef.no" },
+    { name = "Federico Belotti", email = "belo.fede@outlook.com" },
 ]
-urls = {Homepage = "https://github.com/enRichMyData/alligator"}
+urls = { Homepage = "https://github.com/enRichMyData/alligator" }
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = { text = "MIT" }
 
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent"
+    "Operating System :: OS Independent",
 ]
 
 dependencies = [
@@ -31,6 +31,7 @@ dependencies = [
     "tensorflow==2.18.0",
     "column-classifier",
     "jsonargparse==4.37.0",
+    "codecarbon==2.3.5",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +40,7 @@ app = [
     "pydantic<3",
     "pydantic-settings==2.8.1",
     "uvicorn==0.34",
-    "python-multipart== 0.0.20"
+    "python-multipart== 0.0.20",
 ]
 dev = [
     "flake8==4.0.1",
@@ -61,14 +62,14 @@ include = ["alligator*", "eval"]
 line-length = 99
 # Enable Pyflakes `E` and `F` codes by default.
 select = [
-  "E",
-  "W", # see: https://pypi.org/project/pycodestyle
-  "F", # see: https://pypi.org/project/pyflakes
-  "I"
+    "E",
+    "W", # see: https://pypi.org/project/pycodestyle
+    "F", # see: https://pypi.org/project/pyflakes
+    "I",
 ]
 ignore = [
-  "E731", # Do not assign a lambda expression, use a def
-  "E402", # Module level import not at top of file
+    "E731", # Do not assign a lambda expression, use a def
+    "E402", # Module level import not at top of file
 ]
 # Exclude a variety of commonly ignored directories.
 exclude = [".git", "docs", "notebooks", "examples", "*.ipynb"]
@@ -140,19 +141,10 @@ warn_return_any = false
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q --strict-markers"
-testpaths = [
-    "tests",
-]
-python_files = [
-    "test_*.py",
-    "*_test.py",
-]
-python_classes = [
-    "Test*",
-]
-python_functions = [
-    "test_*",
-]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
