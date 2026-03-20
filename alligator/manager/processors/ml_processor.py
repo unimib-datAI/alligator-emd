@@ -1,4 +1,5 @@
 import multiprocessing as mp
+import os
 from functools import partial
 from typing import Tuple
 
@@ -6,6 +7,7 @@ from alligator.config import AlligatorConfig
 from alligator.ml import MLWorker
 
 from .BaseProcessor import BaseProcessor
+from codecarbon import EmissionsTracker
 
 
 class MLProcessor(BaseProcessor):
@@ -17,6 +19,15 @@ class MLProcessor(BaseProcessor):
     def process(self, feature):
         """Run the full ML pipeline: rank stage, compute frequencies, rerank stage."""
         print("Running ML from processor class")
+        emissions_dir = "/app/emissions"
+        os.makedirs(emissions_dir, exist_ok=True)
+        carbon_tracker = EmissionsTracker(
+            project_name="ml-processor-run",
+            output_dir=emissions_dir,
+            save_to_file=True,
+            log_level="warning",
+        )
+        carbon_tracker.start()
         pool = mp.Pool(processes=self.config.worker.num_workers or 1)
         try:
             pool.map(
@@ -36,6 +47,8 @@ class MLProcessor(BaseProcessor):
         finally:
             pool.close()
             pool.join()
+            emissions = carbon_tracker.stop()
+            print(f"Emissions tracked {emissions} kg CO2eq")
 
     def _run_worker(self, rank: int, stage: str, global_frequencies: Tuple):
         """Create and run a single MLWorker for the given stage."""
