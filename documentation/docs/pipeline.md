@@ -10,6 +10,8 @@ Alligator runs a sequential four-phase pipeline. Each phase is managed by a dedi
 
 ## Overview
 
+![Pipeline Architecture Diagram](/img/9997a1de-1.png)
+
 | Phase | Component | What happens |
 |---|---|---|
 | **1 – Data Onboarding** | `DataManager` | Column classification, chunking, MongoDB ingestion |

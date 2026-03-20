@@ -1,12 +1,12 @@
 ---
-id: custom-processor
-title: Custom ML Processors
+id: custom-matchers
+title: Custom Matchers
 sidebar_position: 10
 ---
 
 # Custom ML Processors
 
-Alligator's ML phase is fully pluggable. Instead of the built-in `MLProcessor` (Keras two-stage ranker), you can swap in any logic you like — an LLM reranker, a rule-based scorer, a remote inference service, or anything else — without touching the rest of the pipeline.
+Alligator's candidate matching phase is fully pluggable. Instead of the built-in `MLProcessor` (Keras two-stage ranker), you can swap in any logic you like — an LLM reranker, a rule-based scorer, a remote inference service, or anything else — without touching the rest of the pipeline.
 
 ## How the registry works
 
@@ -35,10 +35,10 @@ processor.process(feature)
 
 ## Built-in processors
 
-| `processor_id` | Class | What it does |
-|---|---|---|
-| `ml-processor` | `MLProcessor` | Two-stage Keras ranking (default) |
-| `llm-processor` | `LLMProcessor` | OpenAI-compatible LLM reranking |
+| `processor_id`  | Class          | What it does                      |
+| --------------- | -------------- | --------------------------------- |
+| `ml-processor`  | `MLProcessor`  | Two-stage Keras ranking (default) |
+| `llm-processor` | `LLMProcessor` | OpenAI-compatible LLM reranking   |
 
 ## Creating your own processor
 
@@ -126,15 +126,15 @@ Your `process` method receives an `alligator.feature.Feature` instance. It must 
 
 Key things available through `self.config`:
 
-| Config field | Common use |
-|---|---|
-| `self.config.data.dataset_name` | Filter documents by dataset |
-| `self.config.data.table_name` | Filter documents by table |
-| `self.config.database.mongo_uri` | Connect to MongoDB |
-| `self.config.database.db_name` | Database name |
-| `self.config.database.input_collection` | Collection to read/write (`input_data`) |
-| `self.config.retrieval.max_candidates_in_result` | Max candidates to keep per cell |
-| `self.config.ml.ml_worker_batch_size` | Suggested batch size |
+| Config field                                     | Common use                              |
+| ------------------------------------------------ | --------------------------------------- |
+| `self.config.data.dataset_name`                  | Filter documents by dataset             |
+| `self.config.data.table_name`                    | Filter documents by table               |
+| `self.config.database.mongo_uri`                 | Connect to MongoDB                      |
+| `self.config.database.db_name`                   | Database name                           |
+| `self.config.database.input_collection`          | Collection to read/write (`input_data`) |
+| `self.config.retrieval.max_candidates_in_result` | Max candidates to keep per cell         |
+| `self.config.ml.ml_worker_batch_size`            | Suggested batch size                    |
 
 Use `feature.compute_global_frequencies()` if your processor needs global type/predicate frequency data (same as the built-in rerank stage):
 
@@ -255,14 +255,14 @@ The library ships `LLMProcessor` (`processor_id = "llm-processor"`) as a ready-t
 
 Configure it via environment variables:
 
-| Variable | Default | Description |
-|---|---|---|
-| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | API base URL |
-| `LLM_API_KEY` | — | API key |
-| `LLM_MODEL` | `openai/gpt-4o-mini` | Model name |
-| `LLM_GROUPING` | `none` | Set to `row` for one LLM call per row instead of per cell |
-| `LLM_MAX_RETRIES` | `5` | Max retry attempts on failure |
-| `LLM_BACKOFF_INITIAL` | `0.5` | Initial backoff seconds (doubles each retry, max 60 s) |
+| Variable              | Default                        | Description                                               |
+| --------------------- | ------------------------------ | --------------------------------------------------------- |
+| `LLM_BASE_URL`        | `https://openrouter.ai/api/v1` | API base URL                                              |
+| `LLM_API_KEY`         | —                              | API key                                                   |
+| `LLM_MODEL`           | `openai/gpt-4o-mini`           | Model name                                                |
+| `LLM_GROUPING`        | `none`                         | Set to `row` for one LLM call per row instead of per cell |
+| `LLM_MAX_RETRIES`     | `5`                            | Max retry attempts on failure                             |
+| `LLM_BACKOFF_INITIAL` | `0.5`                          | Initial backoff seconds (doubles each retry, max 60 s)    |
 
 Usage:
 
