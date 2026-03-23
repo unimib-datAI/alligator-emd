@@ -12,13 +12,13 @@ Alligator runs a sequential four-phase pipeline. Each phase is managed by a dedi
 
 ![Pipeline Architecture Diagram](/img/9997a1de-1.png)
 
-| Phase | Component | What happens |
-|---|---|---|
-| **1 – Data Onboarding** | `DataManager` | Column classification, chunking, MongoDB ingestion |
+| Phase                     | Component                             | What happens                                                              |
+| ------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| **1 – Data Onboarding**   | `DataManager`                         | Column classification, chunking, MongoDB ingestion                        |
 | **2 – Worker Processing** | `WorkerManager` + `RowBatchProcessor` | Async parallel: entity extraction → candidate fetch → feature computation |
-| **3 – ML Pipeline** | `MLManager` + `MLWorker` | Rank → global frequency computation → Rerank |
-| **4 – Output** | `OutputManager` | CSV generation and MongoDB annotation assembly |
-| **0 – HTTP Ingestion** | FastAPI backend | Optional REST entry point (see below) |
+| **3 – ML Pipeline**       | `MLManager` + `MLWorker`              | Rank → global frequency computation → Rerank                              |
+| **4 – Output**            | `OutputManager`                       | CSV generation and MongoDB annotation assembly                            |
+| **0 – HTTP Ingestion**    | FastAPI backend                       | Optional REST entry point (see below)                                     |
 
 ## Phase 1: Data Onboarding
 
@@ -142,13 +142,13 @@ CSV / DataFrame
 
 ## MongoDB Collections
 
-| Collection | Purpose |
-|---|---|
-| `input_data` | Input rows + final annotations (CEA/CTA/CPA) |
-| `candidates` | Candidate entities per cell |
+| Collection        | Purpose                                         |
+| ----------------- | ----------------------------------------------- |
+| `input_data`      | Input rows + final annotations (CEA/CTA/CPA)    |
+| `candidates`      | Candidate entities per cell                     |
 | `candidate_cache` | SHA-256 keyed TTL cache for retrieval responses |
-| `object_cache` | Cache for object relationship API responses |
-| `literal_cache` | Cache for literal value API responses |
-| `error_logs` | Error records from worker processing |
-| `datasets` | Dataset-level metadata (FastAPI backend) |
-| `tables` | Table-level metadata (FastAPI backend) |
+| `object_cache`    | Cache for object relationship API responses     |
+| `literal_cache`   | Cache for literal value API responses           |
+| `error_logs`      | Error records from worker processing            |
+| `datasets`        | Dataset-level metadata (FastAPI backend)        |
+| `tables`          | Table-level metadata (FastAPI backend)          |

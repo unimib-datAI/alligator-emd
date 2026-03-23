@@ -174,24 +174,28 @@ if __name__ == "__main__":
 ### Configuration Parameters
 
 #### Core Parameters
+
 - `input_csv`: Path to input CSV file or pandas DataFrame
 - `output_csv`: Path for output CSV file (optional, auto-generated if not provided)
 - `dataset_name`: Name for the dataset (auto-generated if not provided)
 - `table_name`: Name for the table (derived from filename if not provided)
 
 #### Processing Parameters
+
 - `num_workers`: Number of parallel workers for entity retrieval (default: CPU count / 2)
 - `worker_batch_size`: Batch size for each worker (default: 64)
 - `num_ml_workers`: Number of workers for ML ranking stages (default: 2)
 - `ml_worker_batch_size`: Batch size for ML workers (default: 256)
 
 #### API Endpoints
+
 - `entity_retrieval_endpoint`: Endpoint for entity candidate retrieval
 - `entity_retrieval_token`: Authentication token for API access
 - `object_retrieval_endpoint`: Endpoint for object relationships (optional)
 - `literal_retrieval_endpoint`: Endpoint for literal relationships (optional)
 
 #### ML and Features
+
 - `candidate_retrieval_limit`: Maximum candidates to fetch per entity (default: 16)
 - `max_candidates_in_result`: Maximum candidates in final output (default: 5)
 - `ranker_model_path`: Path to ranking model (optional)
@@ -201,6 +205,7 @@ if __name__ == "__main__":
 - `doc_percentage_type_features`: Percentage of documents for type features (default: 1.0)
 
 #### Output Control
+
 - `save_output`: Whether to save results (default: True)
 - `save_output_to_csv`: Whether to save to CSV format (default: True)
 - `target_rows`: Specific row indices to process (optional)
@@ -209,6 +214,7 @@ if __name__ == "__main__":
 - `correct_qids`: Known correct QIDs for evaluation (optional)
 
 #### Performance Tuning
+
 - `http_session_limit`: HTTP connection pool limit (default: 32)
 - `http_session_ssl_verify`: SSL verification for HTTP requests (default: False)
 
@@ -245,6 +251,7 @@ column_types = {
 ```
 
 **Key Points:**
+
 - Column indices should be strings (e.g., "0", "1", "2")
 - Values can be a single QID string or a list of QID strings
 - QIDs are Wikidata entity type identifiers (e.g., Q5 for Person, Q11424 for Film)
@@ -252,6 +259,7 @@ column_types = {
 - If not specified, no type constraints are applied to that column
 
 **Common Wikidata QIDs:**
+
 - `Q5`: Human/Person
 - `Q11424`: Film
 - `Q33999`: Actor
@@ -264,6 +272,7 @@ This feature works independently of the `target_columns` parameter, which specif
 ### Output Format
 
 The output CSV includes:
+
 - Original table columns with their data
 - For each NE column, additional columns with suffixes:
   - `_id`: Entity ID (e.g., Wikidata QID)
@@ -272,6 +281,7 @@ The output CSV includes:
   - `_score`: Confidence score
 
 Example output for a table with person names in column 0:
+
 ```
 original_col_0,person_name_id,person_name_name,person_name_desc,person_name_score,...
 "John Smith","Q12345","John Smith","American actor","0.95",...
@@ -280,8 +290,6 @@ original_col_0,person_name_id,person_name_name,person_name_desc,person_name_scor
 ## Contributing
 
 Contributions are welcome! Please read the [contributing guidelines](CONTRIBUTING.md) first.
-
-
 
 ## License
 

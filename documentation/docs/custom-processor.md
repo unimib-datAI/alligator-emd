@@ -4,7 +4,7 @@ title: Custom Matchers
 sidebar_position: 10
 ---
 
-# Custom ML Processors
+# Custom candidate matchers
 
 Alligator's candidate matching phase is fully pluggable. Instead of the built-in `MLProcessor` (Keras two-stage ranker), you can swap in any logic you like — an LLM reranker, a rule-based scorer, a remote inference service, or anything else — without touching the rest of the pipeline.
 
