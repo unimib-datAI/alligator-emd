@@ -1,5 +1,6 @@
 import argparse
 import os
+import tempfile
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -17,7 +18,7 @@ def main(args: argparse.Namespace):
     mongo = MongoWrapper(mongo_uri=args.mongo_uri, db_name="alligator_db")
     cursor = mongo.find_documents(
         collection=db.get_collection("input_data"),
-        query={"dataset_name": args.dataset_name, "status": "DONE", "rerank_status": "DONE"},
+        query={"dataset_name": args.dataset_name, "rank_status": "DONE", "rerank_status": "DONE"},
         projection={"cea": 1, "table_name": 1, "dataset_name": 1, "row_id": 1},
     )
     cea_results = []
@@ -51,8 +52,15 @@ def main(args: argparse.Namespace):
     os.makedirs("./results", exist_ok=True)
     cea_df.to_csv(f"./results/{args.dataset_name}_cea_results.csv", index=False)
 
+    # Filter GT to only the tables that were actually processed
+    processed_tables = set(cea_df["tab_id"].unique())
+    gt_filtered = gt[gt["tab_id"].isin(processed_tables)]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="") as tmp:
+        gt_filtered.to_csv(tmp, index=False, header=False)
+        filtered_gt_path = tmp.name
+
     # CEA evaluate
-    evaluator = CEA_Evaluator(args.ground_truth)
+    evaluator = CEA_Evaluator(filtered_gt_path)
     result = evaluator._evaluate(
         {
             "submission_file_path": f"./results/{args.dataset_name}_cea_results.csv",
@@ -60,6 +68,7 @@ def main(args: argparse.Namespace):
             "aicrowd_participant_id": "dummy_participant",
         }
     )
+    os.unlink(filtered_gt_path)
     print(f"CEA evaluation result: {result}")
 
 

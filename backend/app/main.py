@@ -1,6 +1,7 @@
 from config import settings
 from endpoints.alligator_api import router
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from schemas import RootResponse
 
 _DESCRIPTION = """
@@ -54,6 +55,14 @@ app = FastAPI(
     },
     docs_url="/docs",
     redoc_url="/redoc",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include the alligator router

@@ -1,10 +1,13 @@
 import json
 import os
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 import numpy as np
 import pandas as pd
+import requests
 from bson import ObjectId
 from column_classifier import ColumnClassifier  # added global import
 from dependencies import get_alligator_db, get_db
@@ -25,10 +28,6 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError  # added import
-import requests
-import time
-
-from alligator import Alligator
 from schemas import (
     DatasetCreate,
     DatasetCreateResponse,
@@ -37,6 +36,8 @@ from schemas import (
     TableDataEnvelope,
     TablesListResponse,
 )
+
+from alligator import Alligator
 
 router = APIRouter()
 
@@ -630,3 +631,277 @@ def delete_table(dataset_name: str, table_name: str, db: Database = Depends(get_
 
     # Optionally delete data from alligator_db if needed
     return None
+
+
+@router.get(
+    "/reconcile",
+    tags=["root"],
+    summary="OpenRefine reconciliation manifest or GET reconciliation query",
+)
+def reconcile_get(
+    queries: Optional[str] = Query(
+        None, description="URL-encoded JSON map of reconciliation queries"
+    ),
+):
+    """
+    OpenRefine-compatible endpoint.
+
+    - If `queries` is not provided, return the reconciliation service manifest.
+    - If `queries` is provided, execute reconciliation queries (GET variant).
+    """
+    if queries is None:
+        return {
+            "name": "Alligator EMD Reconciliation Service",
+            "identifierSpace": "http://www.wikidata.org/entity/",
+            "schemaSpace": "http://www.wikidata.org/prop/direct/",
+            "defaultTypes": [{"id": "Q35120", "name": "entity"}],
+            "view": {"url": "https://www.wikidata.org/wiki/{{id}}"},
+            "preview": {
+                "url": "https://www.wikidata.org/wiki/{{id}}",
+                "width": 600,
+                "height": 400,
+            },
+            "suggest": {
+                "entity": {"service_url": "", "service_path": "/suggest/entity"},
+                "type": {"service_url": "", "service_path": "/suggest/type"},
+                "property": {"service_url": "", "service_path": "/suggest/property"},
+            },
+            "batchSize": 50,
+            "versions": ["0.2"],
+        }
+
+    try:
+        payload = json.loads(unquote(queries))
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="Invalid 'queries' parameter: expected JSON map"
+        )
+
+    return _run_reconciliation_queries(payload)
+
+
+@router.post(
+    "/reconcile",
+    tags=["root"],
+    summary="OpenRefine reconciliation query (POST)",
+)
+def reconcile_post(queries: str = Form(..., description="JSON map of reconciliation queries")):
+    """
+    OpenRefine POST reconciliation endpoint.
+
+    Expects form field `queries` containing a JSON object:
+    {
+      "q0": {"query": "...", "type": "...", "limit": 3},
+      "q1": {"query": "..."}
+    }
+    """
+    try:
+        payload = json.loads(queries)
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail="Invalid 'queries' form field: expected JSON map"
+        )
+
+    return _run_reconciliation_queries(payload)
+
+
+
+# NER type -> Wikidata type mapping (used in both suggest and reconcile)
+_NER_TYPE_MAP = {
+    "PER":          [{"id": "Q5",        "name": "human"}],
+    "PERSON":       [{"id": "Q5",        "name": "human"}],
+    "LOC":          [{"id": "Q17334923", "name": "location"}],
+    "LOCATION":     [{"id": "Q17334923", "name": "location"}],
+    "ORG":          [{"id": "Q43229",    "name": "organization"}],
+    "ORGANIZATION": [{"id": "Q43229",    "name": "organization"}],
+}
+
+
+def _ner_type_to_openrefine_types(ner_type: Optional[str]) -> List[Dict[str, str]]:
+    """Map an Alligator NERtype string to an OpenRefine type list (no fallback hardcode)."""
+    if not ner_type:
+        return []
+    return _NER_TYPE_MAP.get(str(ner_type).upper(), [])
+
+
+@router.get(
+    "/suggest/entity",
+    tags=["root"],
+    summary="OpenRefine suggest entity",
+)
+def suggest_entity(
+    prefix: str = Query(..., description="Prefix text"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """Suggest entities by querying the entity retrieval endpoint directly."""
+    text = prefix.strip()
+    if not text:
+        return {"result": []}
+
+    endpoint = os.environ.get("ENTITY_RETRIEVAL_ENDPOINT", "")
+    token = os.environ.get("ENTITY_RETRIEVAL_TOKEN", "")
+    if not endpoint:
+        return {"result": []}
+
+    try:
+        from urllib.parse import quote as _quote
+        url = (
+            f"{endpoint}?name={_quote(text)}&limit={limit}"
+            f"&fuzzy=False&token={token}&kind=entity"
+        )
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        candidates = resp.json()
+    except Exception:
+        return {"result": []}
+
+    results = []
+    for rank, cand in enumerate(candidates or []):
+        qid = cand.get("id", "")
+        if not qid or not str(qid).startswith("Q"):
+            continue
+        name = cand.get("name") or qid
+        types = _ner_type_to_openrefine_types(cand.get("NERtype"))
+        score = 100.0 if str(name).lower() == text.lower() else max(100.0 - rank * 10.0, 10.0)
+        results.append({
+            "id": qid,
+            "name": name,
+            "type": types,
+            "score": score,
+            "match": score == 100.0,
+        })
+
+    return {"result": results[:limit]}
+
+
+@router.get(
+    "/suggest/type",
+    tags=["root"],
+    summary="OpenRefine suggest type",
+)
+def suggest_type(
+    prefix: str = Query(..., description="Prefix text"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """Suggest types from the known NER type map."""
+    p = prefix.strip().lower()
+    all_types: List[Dict[str, str]] = []
+    seen = set()
+    for entries in _NER_TYPE_MAP.values():
+        for t in entries:
+            tid = t["id"]
+            if tid not in seen:
+                seen.add(tid)
+                all_types.append(t)
+    filtered = [t for t in all_types if p in t["name"].lower() or p in t["id"].lower()] if p else all_types
+    return {"result": filtered[:limit]}
+
+
+@router.get(
+    "/suggest/property",
+    tags=["root"],
+    summary="OpenRefine suggest property",
+)
+def suggest_property(
+    prefix: str = Query(..., description="Prefix text"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """Suggest Wikidata properties by querying the entity retrieval endpoint."""
+    text = prefix.strip()
+    if not text:
+        return {"result": []}
+
+    endpoint = os.environ.get("ENTITY_RETRIEVAL_ENDPOINT", "")
+    token = os.environ.get("ENTITY_RETRIEVAL_TOKEN", "")
+    if not endpoint:
+        return {"result": []}
+
+    try:
+        from urllib.parse import quote as _quote
+        url = (
+            f"{endpoint}?name={_quote(text)}&limit={limit}"
+            f"&fuzzy=False&token={token}&kind=property"
+        )
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        candidates = resp.json()
+    except Exception:
+        return {"result": []}
+
+    results = []
+    for cand in candidates or []:
+        pid = cand.get("id", "")
+        if not pid or not str(pid).startswith("P"):
+            continue
+        results.append({
+            "id": pid,
+            "name": cand.get("name") or pid,
+        })
+
+    return {"result": results[:limit]}
+
+
+def _run_reconciliation_queries(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Synchronous OpenRefine-compatible reconciliation.
+    Calls the entity retrieval endpoint directly for each query,
+    returns real QIDs, names and types -- no hardcoded IDs, no stale DB scan.
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Reconciliation payload must be a JSON object")
+
+    endpoint = os.environ.get("ENTITY_RETRIEVAL_ENDPOINT", "")
+    token = os.environ.get("ENTITY_RETRIEVAL_TOKEN", "")
+
+    output: Dict[str, Any] = {}
+
+    for key, query_obj in payload.items():
+        if isinstance(query_obj, dict):
+            query_text = str(query_obj.get("query", "")).strip()
+            limit = query_obj.get("limit", 3)
+            try:
+                limit = max(1, min(int(limit), 20))
+            except Exception:
+                limit = 3
+        else:
+            query_text = ""
+            limit = 3
+
+        if not query_text or not endpoint:
+            output[key] = {"result": []}
+            continue
+
+        try:
+            from urllib.parse import quote as _quote
+            url = (
+                f"{endpoint}?name={_quote(query_text)}&limit={limit}"
+                f"&fuzzy=False&token={token}&kind=entity"
+            )
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            candidates = resp.json()
+        except Exception:
+            output[key] = {"result": []}
+            continue
+
+        results = []
+        for rank, cand in enumerate(candidates or []):
+            qid = cand.get("id", "")
+            if not qid or not str(qid).startswith("Q"):
+                continue
+            name = cand.get("name") or qid
+            types = _ner_type_to_openrefine_types(cand.get("NERtype"))
+            # score: exact label match -> 100, else decay by rank
+            score = 100.0 if str(name).lower() == query_text.lower() else max(100.0 - rank * 10.0, 10.0)
+            match = score == 100.0
+            results.append({
+                "id": qid,
+                "name": name,
+                "type": types,
+                "score": score,
+                "match": match,
+            })
+
+        output[key] = {"result": results}
+
+    return output

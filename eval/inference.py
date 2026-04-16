@@ -19,6 +19,7 @@ load_dotenv(PROJECT_ROOT)
 
 def main(args: argparse.Namespace):
     perf = {}
+    print(f"[inference] table_limit={getattr(args, 'table_limit', 0)}")
     gt = pd.read_csv(
         args.ground_truth,
         delimiter=",",
@@ -26,9 +27,16 @@ def main(args: argparse.Namespace):
         dtype={"tab_id": str, "row_id": str, "col_id": str, "entity": str},
         keep_default_na=False,
     )
-    for table_path in tqdm.tqdm(os.listdir(args.tables_dir)):
-        if os.path.splitext(table_path)[1] != ".csv":
-            continue
+    processed_tables = 0
+    # gather csv files and apply table limit so tqdm shows correct total
+    # Exclude macOS resource-fork files that start with '._' and only keep .csv
+    all_files = [f for f in sorted(os.listdir(args.tables_dir)) if os.path.splitext(f)[1] == ".csv" and not os.path.basename(f).startswith("._")]
+    if getattr(args, "table_limit", 0):
+        limited_files = all_files[: int(args.table_limit)]
+    else:
+        limited_files = all_files
+
+    for table_path in tqdm.tqdm(limited_files, total=len(limited_files)):
         table_path = os.path.join(args.tables_dir, table_path)
         if not os.path.exists(table_path):
             print(f"Error: File {table_path} does not exist.")
@@ -98,8 +106,21 @@ def main(args: argparse.Namespace):
         toc = time.perf_counter()
         print(f"Processing completed in {toc - tic:0.4f} seconds.")
         perf[table_path] = {"elapsed_time": toc - tic, "nrows": len(table)}
+        processed_tables += 1
+        if getattr(args, "table_limit", 0):
+            if processed_tables >= int(args.table_limit):
+                print(f"Reached table limit ({args.table_limit}). Stopping.")
+                break
+
+    if not perf:
+        print("No tables were processed. No performance data to show.")
+        return
 
     perf_df = pd.DataFrame.from_dict(perf, orient="index")
+    if "nrows" not in perf_df.columns or "elapsed_time" not in perf_df.columns:
+        print("Incomplete performance data. Skipping summary.")
+        return
+
     print(
         "Average elapsed time per row: {} row/s".format(
             perf_df["nrows"].sum() / perf_df["elapsed_time"].sum()
@@ -123,6 +144,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_class_arguments(Alligator, "gator")
+    parser.add_argument("--table-limit", type=int, default=0, help="Limit number of tables to process (0 = no limit)")
     parser.add_argument(
         "--gator.mongo-uri",
         type=str,

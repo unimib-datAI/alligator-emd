@@ -192,3 +192,4 @@ node_modules/
 # Docusaurus build output
 documentation/build
 documentation/.docusaurus
+.aider*
