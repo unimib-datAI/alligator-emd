@@ -22,6 +22,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -639,6 +640,7 @@ def delete_table(dataset_name: str, table_name: str, db: Database = Depends(get_
     summary="OpenRefine reconciliation manifest or GET reconciliation query",
 )
 def reconcile_get(
+    request: Request,
     queries: Optional[str] = Query(
         None, description="URL-encoded JSON map of reconciliation queries"
     ),
@@ -650,6 +652,7 @@ def reconcile_get(
     - If `queries` is provided, execute reconciliation queries (GET variant).
     """
     if queries is None:
+        base = str(request.base_url).rstrip("/")
         return {
             "name": "Alligator EMD Reconciliation Service",
             "identifierSpace": "http://www.wikidata.org/entity/",
@@ -662,9 +665,9 @@ def reconcile_get(
                 "height": 400,
             },
             "suggest": {
-                "entity": {"service_url": "", "service_path": "/suggest/entity"},
-                "type": {"service_url": "", "service_path": "/suggest/type"},
-                "property": {"service_url": "", "service_path": "/suggest/property"},
+                "entity": {"service_url": base, "service_path": "/suggest/entity"},
+                "type": {"service_url": base, "service_path": "/suggest/type"},
+                "property": {"service_url": base, "service_path": "/suggest/property"},
             },
             "batchSize": 50,
             "versions": ["0.2"],
@@ -730,11 +733,12 @@ def _ner_type_to_openrefine_types(ner_type: Optional[str]) -> List[Dict[str, str
     summary="OpenRefine suggest entity",
 )
 def suggest_entity(
-    prefix: str = Query(..., description="Prefix text"),
+    query: Optional[str] = Query(None, description="Prefix text"),
+    prefix: Optional[str] = Query(None, description="Prefix text (alias)"),
     limit: int = Query(10, ge=1, le=50),
 ):
     """Suggest entities by querying the entity retrieval endpoint directly."""
-    text = prefix.strip()
+    text = (query or prefix or "").strip()
     if not text:
         return {"result": []}
 
@@ -780,11 +784,12 @@ def suggest_entity(
     summary="OpenRefine suggest type",
 )
 def suggest_type(
-    prefix: str = Query(..., description="Prefix text"),
+    query: Optional[str] = Query(None, description="Prefix text"),
+    prefix: Optional[str] = Query(None, description="Prefix text (alias)"),
     limit: int = Query(10, ge=1, le=50),
 ):
     """Suggest types from the known NER type map."""
-    p = prefix.strip().lower()
+    p = (query or prefix or "").strip().lower()
     all_types: List[Dict[str, str]] = []
     seen = set()
     for entries in _NER_TYPE_MAP.values():
@@ -803,11 +808,12 @@ def suggest_type(
     summary="OpenRefine suggest property",
 )
 def suggest_property(
-    prefix: str = Query(..., description="Prefix text"),
+    query: Optional[str] = Query(None, description="Prefix text"),
+    prefix: Optional[str] = Query(None, description="Prefix text (alias)"),
     limit: int = Query(10, ge=1, le=50),
 ):
     """Suggest Wikidata properties by querying the entity retrieval endpoint."""
-    text = prefix.strip()
+    text = (query or prefix or "").strip()
     if not text:
         return {"result": []}
 
