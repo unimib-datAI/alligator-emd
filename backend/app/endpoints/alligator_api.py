@@ -667,9 +667,18 @@ def reconcile_get(
                 "height": 400,
             },
             "suggest": {
-                "entity": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/entity"},
-                "type": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/type"},
-                "property": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/property"},
+                "entity": {
+                    "service_url": base,
+                    "service_path": str(root).replace(base, "") + "/alligator/suggest/entity",
+                },
+                "type": {
+                    "service_url": base,
+                    "service_path": str(root).replace(base, "") + "/alligator/suggest/type",
+                },
+                "property": {
+                    "service_url": base,
+                    "service_path": str(root).replace(base, "") + "/alligator/suggest/property",
+                },
             },
             "batchSize": 50,
             "versions": ["0.2"],
@@ -710,15 +719,14 @@ def reconcile_post(queries: str = Form(..., description="JSON map of reconciliat
     return _run_reconciliation_queries(payload)
 
 
-
 # NER type -> Wikidata type mapping (used in both suggest and reconcile)
 _NER_TYPE_MAP = {
-    "PER":          [{"id": "Q5",        "name": "human"}],
-    "PERSON":       [{"id": "Q5",        "name": "human"}],
-    "LOC":          [{"id": "Q17334923", "name": "location"}],
-    "LOCATION":     [{"id": "Q17334923", "name": "location"}],
-    "ORG":          [{"id": "Q43229",    "name": "organization"}],
-    "ORGANIZATION": [{"id": "Q43229",    "name": "organization"}],
+    "PER": [{"id": "Q5", "name": "human"}],
+    "PERSON": [{"id": "Q5", "name": "human"}],
+    "LOC": [{"id": "Q17334923", "name": "location"}],
+    "LOCATION": [{"id": "Q17334923", "name": "location"}],
+    "ORG": [{"id": "Q43229", "name": "organization"}],
+    "ORGANIZATION": [{"id": "Q43229", "name": "organization"}],
 }
 
 
@@ -751,10 +759,8 @@ def suggest_entity(
 
     try:
         from urllib.parse import quote as _quote
-        url = (
-            f"{endpoint}?name={_quote(text)}&limit={limit}"
-            f"&fuzzy=False&token={token}&kind=entity"
-        )
+
+        url = f"{endpoint}?name={_quote(text)}&limit={limit}&fuzzy=False&token={token}&kind=entity"
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         candidates = resp.json()
@@ -769,13 +775,15 @@ def suggest_entity(
         name = cand.get("name") or qid
         types = _ner_type_to_openrefine_types(cand.get("NERtype"))
         score = 100.0 if str(name).lower() == text.lower() else max(100.0 - rank * 10.0, 10.0)
-        results.append({
-            "id": qid,
-            "name": name,
-            "type": types,
-            "score": score,
-            "match": score == 100.0,
-        })
+        results.append(
+            {
+                "id": qid,
+                "name": name,
+                "type": types,
+                "score": score,
+                "match": score == 100.0,
+            }
+        )
 
     return {"result": results[:limit]}
 
@@ -800,7 +808,11 @@ def suggest_type(
             if tid not in seen:
                 seen.add(tid)
                 all_types.append(t)
-    filtered = [t for t in all_types if p in t["name"].lower() or p in t["id"].lower()] if p else all_types
+    filtered = (
+        [t for t in all_types if p in t["name"].lower() or p in t["id"].lower()]
+        if p
+        else all_types
+    )
     return {"result": filtered[:limit]}
 
 
@@ -826,9 +838,9 @@ def suggest_property(
 
     try:
         from urllib.parse import quote as _quote
+
         url = (
-            f"{endpoint}?name={_quote(text)}&limit={limit}"
-            f"&fuzzy=False&token={token}&kind=property"
+            f"{endpoint}?name={_quote(text)}&limit={limit}&fuzzy=False&token={token}&kind=property"
         )
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
@@ -841,10 +853,12 @@ def suggest_property(
         pid = cand.get("id", "")
         if not pid or not str(pid).startswith("P"):
             continue
-        results.append({
-            "id": pid,
-            "name": cand.get("name") or pid,
-        })
+        results.append(
+            {
+                "id": pid,
+                "name": cand.get("name") or pid,
+            }
+        )
 
     return {"result": results[:limit]}
 
@@ -881,6 +895,7 @@ def _run_reconciliation_queries(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             from urllib.parse import quote as _quote
+
             url = (
                 f"{endpoint}?name={_quote(query_text)}&limit={limit}"
                 f"&fuzzy=False&token={token}&kind=entity"
@@ -900,15 +915,21 @@ def _run_reconciliation_queries(payload: Dict[str, Any]) -> Dict[str, Any]:
             name = cand.get("name") or qid
             types = _ner_type_to_openrefine_types(cand.get("NERtype"))
             # score: exact label match -> 100, else decay by rank
-            score = 100.0 if str(name).lower() == query_text.lower() else max(100.0 - rank * 10.0, 10.0)
+            score = (
+                100.0
+                if str(name).lower() == query_text.lower()
+                else max(100.0 - rank * 10.0, 10.0)
+            )
             match = score == 100.0
-            results.append({
-                "id": qid,
-                "name": name,
-                "type": types,
-                "score": score,
-                "match": match,
-            })
+            results.append(
+                {
+                    "id": qid,
+                    "name": name,
+                    "type": types,
+                    "score": score,
+                    "match": match,
+                }
+            )
 
         output[key] = {"result": results}
 
