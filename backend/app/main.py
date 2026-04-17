@@ -1,7 +1,7 @@
 from config import settings
-from endpoints.alligator_api import router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from schemas import RootResponse
 
 _DESCRIPTION = """
@@ -25,18 +25,9 @@ Interactive documentation is available at:
 """
 
 _TAGS_METADATA = [
-    {
-        "name": "root",
-        "description": "Health-check / service-info endpoint.",
-    },
-    {
-        "name": "datasets",
-        "description": "Create, list and delete datasets.",
-    },
-    {
-        "name": "tables",
-        "description": "Upload, list, retrieve and delete tables within a dataset.",
-    },
+    {"name": "root",     "description": "Health-check / service-info endpoint."},
+    {"name": "datasets", "description": "Create, list and delete datasets."},
+    {"name": "tables",   "description": "Upload, list, retrieve and delete tables within a dataset."},
 ]
 
 app = FastAPI(
@@ -57,16 +48,32 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# CORS — must be added BEFORE including routers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# Include the alligator router
+# Include the alligator router AFTER middleware
+from endpoints.alligator_api import router  # noqa: E402
 app.include_router(router)
+
+
+@app.options("/{rest_of_path:path}")
+def preflight_handler(rest_of_path: str) -> Response:
+    """Explicit OPTIONS handler so CORS preflight always succeeds."""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 @app.get(
