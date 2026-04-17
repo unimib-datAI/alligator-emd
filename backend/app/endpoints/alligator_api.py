@@ -653,6 +653,8 @@ def reconcile_get(
     """
     if queries is None:
         base = str(request.base_url).rstrip("/")
+        # strip the /reconcile suffix to get the root path prefix
+        root = "/".join(str(request.url).split("?")[0].rstrip("/").split("/")[:-1])
         return {
             "name": "Alligator EMD Reconciliation Service",
             "identifierSpace": "http://www.wikidata.org/entity/",
@@ -665,9 +667,9 @@ def reconcile_get(
                 "height": 400,
             },
             "suggest": {
-                "entity": {"service_url": base, "service_path": "/suggest/entity"},
-                "type": {"service_url": base, "service_path": "/suggest/type"},
-                "property": {"service_url": base, "service_path": "/suggest/property"},
+                "entity": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/entity"},
+                "type": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/type"},
+                "property": {"service_url": base, "service_path": str(root).replace(base, "") + "/suggest/property"},
             },
             "batchSize": 50,
             "versions": ["0.2"],
