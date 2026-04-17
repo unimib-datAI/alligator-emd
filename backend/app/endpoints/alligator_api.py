@@ -764,7 +764,8 @@ def suggest_entity(
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         candidates = resp.json()
-    except Exception:
+    except Exception as e:
+        print(f"exception in suggest: {e}")
         return {"result": []}
 
     results = []
@@ -798,22 +799,45 @@ def suggest_type(
     prefix: Optional[str] = Query(None, description="Prefix text (alias)"),
     limit: int = Query(10, ge=1, le=50),
 ):
-    """Suggest types from the known NER type map."""
-    p = (query or prefix or "").strip().lower()
-    all_types: List[Dict[str, str]] = []
-    seen = set()
-    for entries in _NER_TYPE_MAP.values():
-        for t in entries:
-            tid = t["id"]
-            if tid not in seen:
-                seen.add(tid)
-                all_types.append(t)
-    filtered = (
-        [t for t in all_types if p in t["name"].lower() or p in t["id"].lower()]
-        if p
-        else all_types
-    )
-    return {"result": filtered[:limit]}
+    """Suggest Wikidata types (items) via the Wikidata search API."""
+    text = (query or prefix or "").strip()
+    if not text:
+        return {"result": []}
+
+    try:
+        resp = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": text,
+                "type": "item",
+                "language": "en",
+                "limit": limit,
+                "format": "json",
+            },
+            headers={"User-Agent": "AlligatorEMD/1.0 (https://github.com/unimib-datAI/alligator)"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print("exception in suggest type", e)
+        return {"result": []}
+
+    results = []
+    for item in data.get("search", []):
+        qid = item.get("id", "")
+        if not qid:
+            continue
+        results.append(
+            {
+                "id": qid,
+                "name": item.get("label") or qid,
+                "description": item.get("description", ""),
+            }
+        )
+
+    return {"result": results}
 
 
 @router.get(
@@ -826,41 +850,48 @@ def suggest_property(
     prefix: Optional[str] = Query(None, description="Prefix text (alias)"),
     limit: int = Query(10, ge=1, le=50),
 ):
-    """Suggest Wikidata properties by querying the entity retrieval endpoint."""
+    """Suggest Wikidata properties via the Wikidata search API."""
     text = (query or prefix or "").strip()
     if not text:
         return {"result": []}
 
-    endpoint = os.environ.get("ENTITY_RETRIEVAL_ENDPOINT", "")
-    token = os.environ.get("ENTITY_RETRIEVAL_TOKEN", "")
-    if not endpoint:
-        return {"result": []}
-
     try:
-        from urllib.parse import quote as _quote
-
-        url = (
-            f"{endpoint}?name={_quote(text)}&limit={limit}&fuzzy=False&token={token}&kind=property"
+        resp = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": text,
+                "type": "property",
+                "language": "en",
+                "limit": limit,
+                "format": "json",
+                "uselang": "en",
+                "strictlanguage": 0,
+            },
+            headers={"User-Agent": "AlligatorEMD/1.0 (https://github.com/unimib-datAI/alligator)"},
+            timeout=10,
         )
-        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
-        candidates = resp.json()
-    except Exception:
+        data = resp.json()
+        print(data)
+    except Exception as e:
+        print(f"exception in suggest: {e}")
         return {"result": []}
 
     results = []
-    for cand in candidates or []:
-        pid = cand.get("id", "")
-        if not pid or not str(pid).startswith("P"):
+    for item in data.get("search", []):
+        pid = item.get("id", "")
+        if not pid:
             continue
         results.append(
             {
                 "id": pid,
-                "name": cand.get("name") or pid,
+                "name": item.get("label") or pid,
+                "description": item.get("description", ""),
             }
         )
 
-    return {"result": results[:limit]}
+    return {"result": results}
 
 
 def _run_reconciliation_queries(payload: Dict[str, Any]) -> Dict[str, Any]:
